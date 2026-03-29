@@ -31,7 +31,7 @@
 ### 方式一：一键安装（推荐）
 
 ```bash
-git clone https://github.com/hyf/cc-cli.git
+git clone https://github.com/Evan-Huang-yf/cc-cli.git
 cd cc-cli
 bash install.sh
 source ~/.bashrc

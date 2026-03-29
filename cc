@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # cc - Claude Code 账号/API Key 快速切换工具
-# 项目地址: https://github.com/hyf/cc-cli
+# 项目地址: https://github.com/Evan-Huang-yf/cc-cli
 # 数据目录: ~/.cc-profiles/
 # 协议: MIT
 # 作者: hyf
