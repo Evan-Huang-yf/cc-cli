@@ -119,7 +119,7 @@ Profile 列表:
        名称               类型     标签     标识
   ────────────────────────────────────────────────────────────────────────
     official             oauth      -          OAuth 登录
-  ▶ runapi               api_key    dev        sk-mHy***KDbD @ https://runapi.co
+  ▶ runapi               api_key    dev        sk-ant***m3Kx @ https://api.example.com
     work                 api_key    prod       sk-ant***-xxx
 ```
 
