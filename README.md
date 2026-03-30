@@ -157,9 +157,10 @@ cc use          # fzf 交互选择
 ```
 
 切换 API Key 类型 profile 时，工具会自动：
-1. 更新 `~/.claude/config.json`
-2. 更新环境变量 `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`
-3. 自动启动 `claude`
+1. 更新 `~/.claude/config.json`（API Key）
+2. 更新 `~/.claude/settings.json` 的 `env` 字段（Base URL，让 IDE 侧边栏也能读到）
+3. 更新终端环境变量 `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`
+4. 自动启动 `claude`
 
 切换 OAuth 类型时，会执行 `claude /logout` + `claude /login` 流程。
 
@@ -253,8 +254,10 @@ cc-cli 使用以下文件：
 ├── .lock                  # 文件锁（并发控制，自动管理）
 ├── .config_backup.json    # 上次切换前的 config.json 备份
 └── backups/               # cc backup 的备份目录
-    ├── profiles_20260329_120000.json
-    └── config_20260329_120000.json
+
+~/.claude/
+├── config.json            # cc 写入 primaryApiKey（Claude Code 读取）
+└── settings.json          # cc 写入 env.ANTHROPIC_BASE_URL（IDE 侧边栏读取）
 ```
 
 ### profiles.json 结构

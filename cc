@@ -413,6 +413,14 @@ cmd_use() {
             echo "$new_config" > "$CLAUDE_CONFIG"
         fi
 
+        # OAuth: 清除 settings.json 中的 ANTHROPIC_BASE_URL
+        local CLAUDE_SETTINGS="$HOME/.claude/settings.json"
+        if [ -f "$CLAUDE_SETTINGS" ]; then
+            local new_settings
+            new_settings=$(jq 'del(.env.ANTHROPIC_BASE_URL) | if .env == {} then del(.env) else . end' "$CLAUDE_SETTINGS")
+            echo "$new_settings" > "$CLAUDE_SETTINGS"
+        fi
+
         # OAuth: 清除 API key 和 base url
         {
             echo "unset ANTHROPIC_API_KEY 2>/dev/null || true"
@@ -724,11 +732,13 @@ cmd_edit() {
     fi
 }
 
-# 内部函数：将 profile 配置写入 config.json 和 env.sh（不更新 active）
+# 内部函数：将 profile 配置写入 config.json、settings.json 和 env.sh（不更新 active）
 _apply_profile() {
     local name="$1"
     local type
     type=$(read_profiles ".profiles[\"$name\"].type")
+
+    local CLAUDE_SETTINGS="$HOME/.claude/settings.json"
 
     if [ "$type" = "api_key" ]; then
         local key url
@@ -736,6 +746,7 @@ _apply_profile() {
         url=$(read_profiles ".profiles[\"$name\"].url // empty")
         local key_tail="${key: -20}"
 
+        # 写入 config.json（API Key）
         local new_config
         if [ -f "$CLAUDE_CONFIG" ]; then
             new_config=$(jq \
@@ -754,6 +765,24 @@ _apply_profile() {
         echo "$new_config" > "$tmp"
         mv "$tmp" "$CLAUDE_CONFIG"
 
+        # 写入 settings.json 的 env 字段（让 IDE 侧边栏也能读到 base URL）
+        if [ -n "$url" ]; then
+            if [ -f "$CLAUDE_SETTINGS" ]; then
+                local new_settings
+                new_settings=$(jq --arg url "$url" \
+                    '.env.ANTHROPIC_BASE_URL = $url' "$CLAUDE_SETTINGS")
+                echo "$new_settings" > "$CLAUDE_SETTINGS"
+            fi
+        else
+            # 无自定义 URL，清除 settings.json 中的 ANTHROPIC_BASE_URL
+            if [ -f "$CLAUDE_SETTINGS" ]; then
+                local new_settings
+                new_settings=$(jq 'del(.env.ANTHROPIC_BASE_URL) | if .env == {} then del(.env) else . end' "$CLAUDE_SETTINGS")
+                echo "$new_settings" > "$CLAUDE_SETTINGS"
+            fi
+        fi
+
+        # 写入 env.sh（终端环境变量）
         {
             echo "export ANTHROPIC_API_KEY=\"$key\""
             if [ -n "$url" ]; then
