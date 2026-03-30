@@ -8,7 +8,7 @@ _cc_complete() {
 
     # 第一层：子命令补全
     if [ "$COMP_CWORD" -eq 1 ]; then
-        COMPREPLY=($(compgen -W "list current add use edit test exec rm rename show export import-file backup import help" -- "$cur"))
+        COMPREPLY=($(compgen -W "list current add use edit test exec rm rename show export import-file backup update import help" -- "$cur"))
         return
     fi
 

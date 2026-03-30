@@ -11,6 +11,7 @@ PROFILES_DIR="$HOME/.cc-profiles"
 PROFILES_FILE="$PROFILES_DIR/profiles.json"
 CLAUDE_CONFIG="$HOME/.claude/config.json"
 ENV_FILE="$PROFILES_DIR/env.sh"
+REPO_URL="https://github.com/Evan-Huang-yf/cc-cli.git"
 
 # 颜色定义
 RED='\033[0;31m'
@@ -62,6 +63,7 @@ cc - Claude Code 账号快速切换工具
   cc export [--file <路径>]                    导出 profiles（默认输出到 stdout）
   cc import-file <路径>                        从文件导入 profiles（合并模式）
   cc backup                                    备份当前配置
+  cc update                                    从 GitHub 更新到最新版本
   cc help                                      显示帮助
 
 示例:
@@ -933,6 +935,54 @@ cmd_import_file() {
     echo -e "\n${GREEN}导入完成: ${added} 个新增, ${skipped} 个跳过${NC}"
 }
 
+# 自更新
+cmd_update() {
+    if ! command -v git &>/dev/null; then
+        echo -e "${RED}需要 git 才能更新，请先安装 git${NC}"
+        return 1
+    fi
+
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    trap 'rm -rf "$tmp_dir"' EXIT
+
+    echo -e "${CYAN}正在检查更新...${NC}"
+
+    if ! git clone --depth 1 "$REPO_URL" "$tmp_dir" 2>/dev/null; then
+        echo -e "${RED}✗ 无法连接到 GitHub 仓库${NC}"
+        echo -e "  $REPO_URL"
+        return 1
+    fi
+
+    # 对比版本（用文件 hash）
+    local current_hash new_hash
+    current_hash=$(md5sum "$0" 2>/dev/null | cut -d' ' -f1)
+    new_hash=$(md5sum "$tmp_dir/cc" 2>/dev/null | cut -d' ' -f1)
+
+    if [ "$current_hash" = "$new_hash" ]; then
+        echo -e "${GREEN}✓ 已经是最新版本${NC}"
+        return
+    fi
+
+    echo -e "${CYAN}发现新版本，正在更新...${NC}"
+
+    # 更新主脚本
+    cp "$tmp_dir/cc" "$HOME/.local/bin/cc"
+    chmod +x "$HOME/.local/bin/cc"
+    echo -e "  ${GREEN}✓${NC} cc → ~/.local/bin/cc"
+
+    # 更新补全脚本
+    if [ -f "$tmp_dir/completions/cc.bash" ]; then
+        mkdir -p "$HOME/.bash_completion.d"
+        cp "$tmp_dir/completions/cc.bash" "$HOME/.bash_completion.d/cc"
+        echo -e "  ${GREEN}✓${NC} cc.bash → ~/.bash_completion.d/cc"
+    fi
+
+    echo ""
+    echo -e "${GREEN}${BOLD}✓ 更新完成${NC}"
+    echo -e "  请执行 ${BOLD}source ~/.bashrc${NC} 或重开终端使更改生效"
+}
+
 # 备份
 cmd_backup() {
     local backup_dir="$PROFILES_DIR/backups"
@@ -1011,6 +1061,7 @@ main() {
         export)           cmd_export "$@" ;;
         import-file)      with_lock cmd_import_file "$@" ;;
         backup)           cmd_backup "$@" ;;
+        update)           cmd_update "$@" ;;
         import)           cmd_import_current "$@" ;;
         help|-h|--help)   usage ;;
         *)

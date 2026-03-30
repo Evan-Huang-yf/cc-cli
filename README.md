@@ -239,9 +239,26 @@ cc import-file backup.json
 
 备份当前配置到 `~/.cc-profiles/backups/`，自动保留最近 10 份。
 
+### `cc update`
+
+从 GitHub 拉取最新版本并自动更新本地安装的 `cc` 脚本和补全脚本。不影响已有的 profiles 数据。
+
+```bash
+cc update
+```
+
 ### `cc help`
 
 显示帮助信息。
+
+## 更新
+
+```bash
+cc update
+source ~/.bashrc
+```
+
+一条命令即可更新到最新版本。你的 profile 数据（`~/.cc-profiles/`）不会受影响。
 
 ## 配置文件说明
 
