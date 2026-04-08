@@ -22,15 +22,39 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-LOCK_FILE="$PROFILES_DIR/.lock"
+LOCK_DIR="$PROFILES_DIR/.lock_dir"
 
 # 文件锁，防止多终端并发写坏 profiles.json
+# 使用 mkdir 原子操作实现跨平台锁（兼容 macOS，无需 flock）
 with_lock() {
-    exec 200>"$LOCK_FILE"
-    flock -w 5 200 || { echo -e "${RED}获取锁超时，可能有其他 cc 进程在运行${NC}"; return 1; }
+    local waited=0
+    while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+        # 检查锁是否过期（超过 30 秒视为残留锁）
+        if [ -d "$LOCK_DIR" ]; then
+            local lock_age=0
+            if [[ "$OSTYPE" == darwin* ]]; then
+                lock_age=$(( $(date +%s) - $(stat -f %m "$LOCK_DIR" 2>/dev/null || echo 0) ))
+            else
+                lock_age=$(( $(date +%s) - $(stat -c %Y "$LOCK_DIR" 2>/dev/null || echo 0) ))
+            fi
+            if [ "$lock_age" -gt 30 ]; then
+                rm -rf "$LOCK_DIR"
+                continue
+            fi
+        fi
+        sleep 0.1
+        waited=$((waited + 1))
+        if [ "$waited" -ge 50 ]; then
+            echo -e "${RED}获取锁超时，可能有其他 cc 进程在运行${NC}"
+            return 1
+        fi
+    done
+    # 确保退出时释放锁
+    trap 'rm -rf "$LOCK_DIR"' EXIT
     "$@"
     local ret=$?
-    exec 200>&-
+    rm -rf "$LOCK_DIR"
+    trap - EXIT
     return $ret
 }
 
@@ -954,10 +978,18 @@ cmd_update() {
         return 1
     fi
 
-    # 对比版本（用文件 hash）
+    # 对比版本（用文件 hash，兼容 macOS 和 Linux）
     local current_hash new_hash
-    current_hash=$(md5sum "$0" 2>/dev/null | cut -d' ' -f1)
-    new_hash=$(md5sum "$tmp_dir/cc" 2>/dev/null | cut -d' ' -f1)
+    if command -v md5sum &>/dev/null; then
+        current_hash=$(md5sum "$0" 2>/dev/null | cut -d' ' -f1)
+        new_hash=$(md5sum "$tmp_dir/cc" 2>/dev/null | cut -d' ' -f1)
+    elif command -v md5 &>/dev/null; then
+        current_hash=$(md5 -q "$0" 2>/dev/null)
+        new_hash=$(md5 -q "$tmp_dir/cc" 2>/dev/null)
+    else
+        current_hash=$(shasum "$0" 2>/dev/null | cut -d' ' -f1)
+        new_hash=$(shasum "$tmp_dir/cc" 2>/dev/null | cut -d' ' -f1)
+    fi
 
     if [ "$current_hash" = "$new_hash" ]; then
         echo -e "${GREEN}✓ 已经是最新版本${NC}"
@@ -977,10 +1009,21 @@ cmd_update() {
         cp "$tmp_dir/completions/cc.bash" "$HOME/.bash_completion.d/cc"
         echo -e "  ${GREEN}✓${NC} cc.bash → ~/.bash_completion.d/cc"
     fi
+    if [ -f "$tmp_dir/completions/cc.zsh" ]; then
+        mkdir -p "$HOME/.zsh_completion.d"
+        cp "$tmp_dir/completions/cc.zsh" "$HOME/.zsh_completion.d/_cc"
+        echo -e "  ${GREEN}✓${NC} cc.zsh → ~/.zsh_completion.d/_cc"
+    fi
 
     echo ""
     echo -e "${GREEN}${BOLD}✓ 更新完成${NC}"
-    echo -e "  请执行 ${BOLD}source ~/.bashrc${NC} 或重开终端使更改生效"
+    local current_shell
+    current_shell=$(basename "${SHELL:-/bin/bash}")
+    if [ "$current_shell" = "zsh" ]; then
+        echo -e "  请执行 ${BOLD}source ~/.zshrc${NC} 或重开终端使更改生效"
+    else
+        echo -e "  请执行 ${BOLD}source ~/.bashrc${NC} 或重开终端使更改生效"
+    fi
 }
 
 # 备份

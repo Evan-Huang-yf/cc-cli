@@ -17,14 +17,25 @@
 - **并发安全** — 文件锁防止多终端同时写配置
 - **Key 脱敏显示** — list / show 只显示 key 头尾，不泄露完整密钥
 
+## 平台支持
+
+| 平台 | Shell | 状态 |
+|------|-------|------|
+| Linux | bash | 完整支持 |
+| Linux | zsh | 完整支持 |
+| macOS | zsh（默认） | 完整支持 |
+| macOS | bash | 完整支持（需 brew install bash） |
+
 ## 依赖
 
 | 依赖 | 必选 | 安装方式 |
 |------|------|----------|
-| bash >= 4.0 | 是 | 系统自带 |
+| bash >= 4.0 | 是 | 系统自带 / `brew install bash`（macOS 自带版本过低） |
 | jq | 是 | `sudo apt install jq` / `brew install jq` |
 | curl | 是 | `sudo apt install curl` / `brew install curl` |
 | fzf | 否 | `sudo apt install fzf` / `brew install fzf`（用于交互选择） |
+
+> **macOS 用户注意**：macOS 自带的 bash 版本为 3.2（因 GPLv3 许可证原因），cc-cli 需要 bash >= 4.0。请通过 Homebrew 安装新版 bash：`brew install bash`。安装后 `/usr/local/bin/bash`（Intel）或 `/opt/homebrew/bin/bash`（Apple Silicon）会被自动使用。
 
 ## 安装
 
@@ -34,17 +45,25 @@
 git clone https://github.com/Evan-Huang-yf/cc-cli.git
 cd cc-cli
 bash install.sh
-source ~/.bashrc
 ```
 
-安装脚本会自动：
+安装脚本会自动检测你的默认 shell（bash/zsh），执行：
 1. 检测依赖是否满足
 2. 复制 `cc` 到 `~/.local/bin/`
-3. 复制补全脚本到 `~/.bash_completion.d/`
-4. 在 `~/.bashrc` 中添加 wrapper 函数
+3. 复制对应的补全脚本（bash → `~/.bash_completion.d/`，zsh → `~/.zsh_completion.d/`）
+4. 在 `~/.bashrc` 或 `~/.zshrc` 中添加 wrapper 函数
 5. 初始化 `~/.cc-profiles/` 数据目录
 
-### 方式二：手动安装
+安装完成后：
+```bash
+# bash 用户
+source ~/.bashrc
+
+# zsh 用户（macOS 默认）
+source ~/.zshrc
+```
+
+### 方式二：手动安装（bash）
 
 ```bash
 # 1. 复制主脚本
@@ -77,6 +96,42 @@ EOF
 
 # 5. 生效
 source ~/.bashrc
+```
+
+### 方式三：手动安装（zsh / macOS）
+
+```bash
+# 1. 复制主脚本
+cp cc ~/.local/bin/cc
+chmod +x ~/.local/bin/cc
+
+# 2. 复制 zsh 补全脚本
+mkdir -p ~/.zsh_completion.d
+cp completions/cc.zsh ~/.zsh_completion.d/_cc
+
+# 3. 确保 ~/.local/bin 在 PATH 中
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+
+# 4. 在 ~/.zshrc 末尾添加以下内容
+cat >> ~/.zshrc << 'EOF'
+
+# cc-cli: Claude Code 账号切换工具
+[ -f "$HOME/.cc-profiles/env.sh" ] && source "$HOME/.cc-profiles/env.sh"
+fpath=($HOME/.zsh_completion.d $fpath)
+autoload -Uz compinit && compinit -C
+cc() {
+    command cc "$@"
+    local ret=$?
+    [ -f "$HOME/.cc-profiles/env.sh" ] && source "$HOME/.cc-profiles/env.sh"
+    if [ "${1:-}" = "use" ] || [ "${1:-}" = "switch" ]; then
+        claude
+    fi
+    return $ret
+}
+EOF
+
+# 5. 生效
+source ~/.zshrc
 ```
 
 ## 快速上手
@@ -255,7 +310,10 @@ cc update
 
 ```bash
 cc update
+# bash 用户
 source ~/.bashrc
+# zsh 用户
+source ~/.zshrc
 ```
 
 一条命令即可更新到最新版本。你的 profile 数据（`~/.cc-profiles/`）不会受影响。
@@ -268,13 +326,19 @@ cc-cli 使用以下文件：
 ~/.cc-profiles/
 ├── profiles.json          # 所有 profile 数据（JSON 格式）
 ├── env.sh                 # 当前激活 profile 的环境变量（自动生成）
-├── .lock                  # 文件锁（并发控制，自动管理）
+├── .lock_dir/             # 目录锁（并发控制，自动管理）
 ├── .config_backup.json    # 上次切换前的 config.json 备份
 └── backups/               # cc backup 的备份目录
 
 ~/.claude/
 ├── config.json            # cc 写入 primaryApiKey（Claude Code 读取）
 └── settings.json          # cc 写入 env.ANTHROPIC_BASE_URL（IDE 侧边栏读取）
+
+# bash 用户
+~/.bash_completion.d/cc    # bash 补全脚本
+
+# zsh 用户
+~/.zsh_completion.d/_cc    # zsh 补全脚本
 ```
 
 ### profiles.json 结构
@@ -315,7 +379,7 @@ cc-cli 使用以下文件：
 
 ## Wrapper 函数说明
 
-`~/.bashrc` 中的 wrapper 函数是必要的，因为：
+`~/.bashrc` 或 `~/.zshrc` 中的 wrapper 函数是必要的，因为：
 
 1. **环境变量生效**：脚本是子进程，无法修改父 shell 的环境变量。wrapper 在当前 shell 中 `source env.sh`，让环境变量生效。
 2. **自动启动 claude**：切换 profile 后自动启动 Claude Code CLI。
@@ -338,11 +402,10 @@ cc-cli 使用以下文件：
 
 ### Q: 支持 zsh 吗？
 
-当前主要支持 bash。zsh 用户需要：
-1. 将 `~/.bashrc` 中的 wrapper 函数改放到 `~/.zshrc`
-2. 补全脚本需要适配 zsh 的补全系统（compdef）
-
-后续版本计划加入原生 zsh 支持。
+完整支持。安装脚本会自动检测你的默认 shell。macOS 默认使用 zsh，安装时会自动：
+- 写入 `~/.zshrc`（而非 `~/.bashrc`）
+- 安装 zsh 原生补全脚本（compdef）
+- 配置 fpath 和 compinit
 
 ### Q: API Key 安全吗？
 
@@ -353,7 +416,7 @@ cc-cli 使用以下文件：
 
 ### Q: 两个终端同时切换会冲突吗？
 
-不会。cc-cli 使用 `flock` 文件锁，写操作（add、use、edit、rm、rename）互斥执行。
+不会。cc-cli 使用目录锁（`mkdir` 原子操作），写操作（add、use、edit、rm、rename）互斥执行。该机制在 Linux 和 macOS 上均可用。
 
 ### Q: cc 和系统的 C 编译器 cc 冲突怎么办？
 
@@ -373,8 +436,9 @@ bash uninstall.sh
 
 ```bash
 rm ~/.local/bin/cc
-rm ~/.bash_completion.d/cc
-# 编辑 ~/.bashrc，删除 cc-cli 相关区块（搜索 "cc-cli" 关键字）
+rm ~/.bash_completion.d/cc 2>/dev/null    # bash 用户
+rm ~/.zsh_completion.d/_cc 2>/dev/null    # zsh 用户
+# 编辑 ~/.bashrc 或 ~/.zshrc，删除 cc-cli 相关区块（搜索 "cc-cli" 关键字）
 # 可选：rm -rf ~/.cc-profiles
 ```
 

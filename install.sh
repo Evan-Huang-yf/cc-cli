@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # cc-cli 一键安装脚本
 # 项目地址: https://github.com/Evan-Huang-yf/cc-cli
+# 支持 bash 和 zsh（Linux / macOS）
 
 set -euo pipefail
 
@@ -14,15 +15,23 @@ NC='\033[0m'
 
 # 安装路径
 INSTALL_BIN="$HOME/.local/bin"
-INSTALL_COMPLETION="$HOME/.bash_completion.d"
 PROFILES_DIR="$HOME/.cc-profiles"
-BASHRC="$HOME/.bashrc"
 
 # 获取脚本所在目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# 检测用户默认 shell
+detect_shell() {
+    local user_shell
+    user_shell=$(basename "${SHELL:-/bin/bash}")
+    echo "$user_shell"
+}
+
+USER_SHELL=$(detect_shell)
+
 echo -e "${BOLD}cc-cli 安装程序${NC}"
 echo -e "────────────────────────────"
+echo -e "  检测到 shell: ${CYAN}${USER_SHELL}${NC}"
 echo ""
 
 # ========== 1. 依赖检测 ==========
@@ -42,12 +51,21 @@ check_dep() {
 
 deps_ok=true
 
-# Bash 版本检测
-bash_version="${BASH_VERSINFO[0]}"
-if [ "$bash_version" -ge 4 ]; then
-    echo -e "  ${GREEN}✓${NC} bash (版本 ${BASH_VERSION})"
+# Bash 版本检测（cc 脚本需要 bash >= 4.0 来执行）
+if command -v bash &>/dev/null; then
+    bash_version=$(bash -c 'echo ${BASH_VERSINFO[0]}')
+    bash_full=$(bash -c 'echo ${BASH_VERSION}')
+    if [ "$bash_version" -ge 4 ]; then
+        echo -e "  ${GREEN}✓${NC} bash (版本 ${bash_full})"
+    else
+        echo -e "  ${RED}✗${NC} bash (当前 ${bash_full}，需要 >= 4.0)"
+        if [[ "$OSTYPE" == darwin* ]]; then
+            echo -e "      ${YELLOW}macOS 自带 bash 版本过低，请执行: brew install bash${NC}"
+        fi
+        deps_ok=false
+    fi
 else
-    echo -e "  ${RED}✗${NC} bash (当前 ${BASH_VERSION}，需要 >= 4.0)"
+    echo -e "  ${RED}✗${NC} bash 未安装"
     deps_ok=false
 fi
 
@@ -73,12 +91,22 @@ echo ""
 echo -e "${CYAN}[2/5] 创建目录...${NC}"
 
 mkdir -p "$INSTALL_BIN"
-mkdir -p "$INSTALL_COMPLETION"
 mkdir -p "$PROFILES_DIR"
 
 echo -e "  ${GREEN}✓${NC} $INSTALL_BIN"
-echo -e "  ${GREEN}✓${NC} $INSTALL_COMPLETION"
 echo -e "  ${GREEN}✓${NC} $PROFILES_DIR"
+
+# 根据 shell 类型创建补全目录
+if [ "$USER_SHELL" = "zsh" ]; then
+    INSTALL_COMPLETION="$HOME/.zsh_completion.d"
+    mkdir -p "$INSTALL_COMPLETION"
+    echo -e "  ${GREEN}✓${NC} $INSTALL_COMPLETION"
+else
+    INSTALL_COMPLETION="$HOME/.bash_completion.d"
+    mkdir -p "$INSTALL_COMPLETION"
+    echo -e "  ${GREEN}✓${NC} $INSTALL_COMPLETION"
+fi
+
 echo ""
 
 # ========== 3. 复制文件 ==========
@@ -94,27 +122,46 @@ cp "$SCRIPT_DIR/cc" "$INSTALL_BIN/cc"
 chmod +x "$INSTALL_BIN/cc"
 echo -e "  ${GREEN}✓${NC} cc → $INSTALL_BIN/cc"
 
-if [ -f "$SCRIPT_DIR/completions/cc.bash" ]; then
-    cp "$SCRIPT_DIR/completions/cc.bash" "$INSTALL_COMPLETION/cc"
-    echo -e "  ${GREEN}✓${NC} cc.bash → $INSTALL_COMPLETION/cc"
+if [ "$USER_SHELL" = "zsh" ]; then
+    if [ -f "$SCRIPT_DIR/completions/cc.zsh" ]; then
+        cp "$SCRIPT_DIR/completions/cc.zsh" "$INSTALL_COMPLETION/_cc"
+        echo -e "  ${GREEN}✓${NC} cc.zsh → $INSTALL_COMPLETION/_cc"
+    else
+        echo -e "  ${YELLOW}○${NC} zsh 补全脚本未找到，跳过"
+    fi
 else
-    echo -e "  ${YELLOW}○${NC} 补全脚本未找到，跳过"
+    if [ -f "$SCRIPT_DIR/completions/cc.bash" ]; then
+        cp "$SCRIPT_DIR/completions/cc.bash" "$INSTALL_COMPLETION/cc"
+        echo -e "  ${GREEN}✓${NC} cc.bash → $INSTALL_COMPLETION/cc"
+    else
+        echo -e "  ${YELLOW}○${NC} bash 补全脚本未找到，跳过"
+    fi
 fi
 
 echo ""
 
-# ========== 4. 配置 bashrc ==========
+# ========== 4. 配置 shell RC 文件 ==========
 echo -e "${CYAN}[4/5] 配置 shell...${NC}"
+
+# 根据 shell 类型选择 RC 文件
+if [ "$USER_SHELL" = "zsh" ]; then
+    RCFILE="$HOME/.zshrc"
+else
+    RCFILE="$HOME/.bashrc"
+fi
+
+# 确保 RC 文件存在
+touch "$RCFILE"
 
 # 检查 PATH 是否包含 ~/.local/bin
 if [[ ":$PATH:" != *":$INSTALL_BIN:"* ]]; then
     echo -e "  ${YELLOW}⚠${NC} ~/.local/bin 不在 PATH 中"
 
-    if ! grep -q 'export PATH=.*\.local/bin' "$BASHRC" 2>/dev/null; then
-        echo '' >> "$BASHRC"
-        echo '# cc-cli: 确保 ~/.local/bin 在 PATH 中' >> "$BASHRC"
-        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASHRC"
-        echo -e "  ${GREEN}✓${NC} 已添加 PATH 配置到 .bashrc"
+    if ! grep -q 'export PATH=.*\.local/bin' "$RCFILE" 2>/dev/null; then
+        echo '' >> "$RCFILE"
+        echo '# cc-cli: 确保 ~/.local/bin 在 PATH 中' >> "$RCFILE"
+        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$RCFILE"
+        echo -e "  ${GREEN}✓${NC} 已添加 PATH 配置到 $(basename "$RCFILE")"
     else
         echo -e "  ${GREEN}✓${NC} PATH 配置已存在"
     fi
@@ -123,10 +170,28 @@ fi
 # 检查并添加 cc wrapper 函数
 CC_MARKER="# cc-cli: Claude Code 账号切换工具"
 
-if grep -qF "$CC_MARKER" "$BASHRC" 2>/dev/null; then
-    echo -e "  ${GREEN}✓${NC} cc wrapper 已存在于 .bashrc"
+if grep -qF "$CC_MARKER" "$RCFILE" 2>/dev/null; then
+    echo -e "  ${GREEN}✓${NC} cc wrapper 已存在于 $(basename "$RCFILE")"
 else
-    cat >> "$BASHRC" << 'BASHRC_BLOCK'
+    if [ "$USER_SHELL" = "zsh" ]; then
+        cat >> "$RCFILE" << 'RCBLOCK'
+
+# cc-cli: Claude Code 账号切换工具
+[ -f "$HOME/.cc-profiles/env.sh" ] && source "$HOME/.cc-profiles/env.sh"
+fpath=($HOME/.zsh_completion.d $fpath)
+autoload -Uz compinit && compinit -C
+cc() {
+    command cc "$@"
+    local ret=$?
+    [ -f "$HOME/.cc-profiles/env.sh" ] && source "$HOME/.cc-profiles/env.sh"
+    if [ "${1:-}" = "use" ] || [ "${1:-}" = "switch" ]; then
+        claude
+    fi
+    return $ret
+}
+RCBLOCK
+    else
+        cat >> "$RCFILE" << 'RCBLOCK'
 
 # cc-cli: Claude Code 账号切换工具
 [ -f "$HOME/.cc-profiles/env.sh" ] && source "$HOME/.cc-profiles/env.sh"
@@ -140,8 +205,9 @@ cc() {
     fi
     return $ret
 }
-BASHRC_BLOCK
-    echo -e "  ${GREEN}✓${NC} 已添加 cc wrapper 到 .bashrc"
+RCBLOCK
+    fi
+    echo -e "  ${GREEN}✓${NC} 已添加 cc wrapper 到 $(basename "$RCFILE")"
 fi
 
 # 初始化 profiles.json
@@ -162,7 +228,11 @@ echo -e "${GREEN}${BOLD}✓ cc-cli 安装成功${NC}"
 echo ""
 echo -e "下一步："
 echo -e "  1. 执行以下命令使配置生效："
-echo -e "     ${BOLD}source ~/.bashrc${NC}"
+if [ "$USER_SHELL" = "zsh" ]; then
+    echo -e "     ${BOLD}source ~/.zshrc${NC}"
+else
+    echo -e "     ${BOLD}source ~/.bashrc${NC}"
+fi
 echo ""
 echo -e "  2. 添加你的第一个 profile："
 echo -e "     ${BOLD}cc add my-key --key sk-ant-api03-xxx${NC}"
