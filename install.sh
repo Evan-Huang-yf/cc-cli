@@ -20,18 +20,58 @@ PROFILES_DIR="$HOME/.cc-profiles"
 # 获取脚本所在目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# 检测用户默认 shell
+# 解析命令行参数
+FORCE_SHELL=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --shell)
+            if [[ -z "${2:-}" ]]; then
+                echo -e "${RED}错误: --shell 需要指定 bash 或 zsh${NC}"
+                exit 1
+            fi
+            if [[ "$2" != "bash" && "$2" != "zsh" ]]; then
+                echo -e "${RED}错误: --shell 只支持 bash 或 zsh，收到: $2${NC}"
+                exit 1
+            fi
+            FORCE_SHELL="$2"
+            shift 2
+            ;;
+        -h|--help)
+            echo "用法: bash install.sh [选项]"
+            echo ""
+            echo "选项:"
+            echo "  --shell bash|zsh  强制指定目标 shell（默认自动检测）"
+            echo "  -h, --help        显示帮助信息"
+            exit 0
+            ;;
+        *)
+            echo -e "${RED}未知参数: $1${NC}"
+            echo "用法: bash install.sh [--shell bash|zsh]"
+            exit 1
+            ;;
+    esac
+done
+
+# 检测用户默认 shell（可通过 --shell 覆盖）
 detect_shell() {
     local user_shell
     user_shell=$(basename "${SHELL:-/bin/bash}")
     echo "$user_shell"
 }
 
-USER_SHELL=$(detect_shell)
+if [[ -n "$FORCE_SHELL" ]]; then
+    USER_SHELL="$FORCE_SHELL"
+else
+    USER_SHELL=$(detect_shell)
+fi
 
 echo -e "${BOLD}cc-cli 安装程序${NC}"
 echo -e "────────────────────────────"
-echo -e "  检测到 shell: ${CYAN}${USER_SHELL}${NC}"
+if [[ -n "$FORCE_SHELL" ]]; then
+    echo -e "  目标 shell: ${CYAN}${USER_SHELL}${NC} (通过 --shell 指定)"
+else
+    echo -e "  检测到 shell: ${CYAN}${USER_SHELL}${NC}"
+fi
 echo ""
 
 # ========== 1. 依赖检测 ==========

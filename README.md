@@ -47,6 +47,13 @@ cd cc-cli
 bash install.sh
 ```
 
+如果你的登录 shell 是 zsh 但想安装到 bash（或反过来），可以用 `--shell` 指定：
+
+```bash
+bash install.sh --shell bash    # 强制安装到 bash
+bash install.sh --shell zsh     # 强制安装到 zsh
+```
+
 安装脚本会自动检测你的默认 shell（bash/zsh），执行：
 1. 检测依赖是否满足
 2. 复制 `cc` 到 `~/.local/bin/`
