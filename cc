@@ -10,6 +10,8 @@ set -euo pipefail
 PROFILES_DIR="$HOME/.cc-profiles"
 PROFILES_FILE="$PROFILES_DIR/profiles.json"
 CLAUDE_CONFIG="$HOME/.claude/config.json"
+CLAUDE_CREDENTIALS="$HOME/.claude/.credentials.json"
+OAUTH_CREDS_DIR="$PROFILES_DIR/oauth-credentials"
 ENV_FILE="$PROFILES_DIR/env.sh"
 REPO_URL="https://github.com/Evan-Huang-yf/cc-cli.git"
 
@@ -61,9 +63,61 @@ with_lock() {
 # 初始化
 init() {
     mkdir -p "$PROFILES_DIR"
+    mkdir -p "$OAUTH_CREDS_DIR"
     if [ ! -f "$PROFILES_FILE" ]; then
         echo '{"profiles":{},"active":""}' > "$PROFILES_FILE"
     fi
+}
+
+# OAuth 凭证缓存：备份当前 .credentials.json 到 profile 专属文件
+_oauth_cache_save() {
+    local name="$1"
+    if [ -f "$CLAUDE_CREDENTIALS" ]; then
+        cp "$CLAUDE_CREDENTIALS" "$OAUTH_CREDS_DIR/${name}.credentials.json"
+        chmod 600 "$OAUTH_CREDS_DIR/${name}.credentials.json"
+        return 0
+    fi
+    return 1
+}
+
+# OAuth 凭证缓存：恢复 profile 专属凭证到 .credentials.json
+_oauth_cache_restore() {
+    local name="$1"
+    local cached="$OAUTH_CREDS_DIR/${name}.credentials.json"
+    if [ -f "$cached" ]; then
+        cp "$cached" "$CLAUDE_CREDENTIALS"
+        chmod 600 "$CLAUDE_CREDENTIALS"
+        return 0
+    fi
+    return 1
+}
+
+# OAuth 凭证缓存：删除 profile 专属凭证
+_oauth_cache_remove() {
+    local name="$1"
+    rm -f "$OAUTH_CREDS_DIR/${name}.credentials.json"
+}
+
+# OAuth 凭证缓存：检查缓存是否存在
+_oauth_cache_exists() {
+    local name="$1"
+    [ -f "$OAUTH_CREDS_DIR/${name}.credentials.json" ]
+}
+
+# OAuth 凭证验证：检查缓存的 token 是否仍然有效
+_oauth_cache_valid() {
+    local name="$1"
+    local cached="$OAUTH_CREDS_DIR/${name}.credentials.json"
+    if [ ! -f "$cached" ]; then
+        return 1
+    fi
+    # 检查文件是否包含有效的 OAuth token 结构
+    local has_token
+    has_token=$(jq -r '.claudeAiOauth.refreshToken // empty' "$cached" 2>/dev/null)
+    if [ -n "$has_token" ]; then
+        return 0
+    fi
+    return 1
 }
 
 # 显示帮助
@@ -80,6 +134,7 @@ cc - Claude Code 账号快速切换工具
   cc use [名称]                                切换到指定 profile（无参数用 fzf 选择）
   cc edit <名称> --key|--url|--tag <值>        就地修改 profile 属性
   cc test [名称]                               测试 profile 连通性
+  cc login [名称]                              强制刷新 OAuth 登录并更新缓存
   cc exec <名称> -- <命令>                     临时使用某 profile 执行命令
   cc rm <名称>                                 删除 profile
   cc rename <旧名> <新名>                      重命名 profile
@@ -196,7 +251,11 @@ cmd_list() {
                 ident=$(mask_key "$key")
             fi
         else
-            ident="OAuth 登录"
+            if _oauth_cache_valid "$name"; then
+                ident="OAuth 登录 (已缓存)"
+            else
+                ident="OAuth 登录"
+            fi
         fi
 
         local tag_display="${tag:--}"
@@ -239,10 +298,13 @@ cmd_current() {
         fi
     else
         echo -e "  认证: OAuth 官方登录"
+        if _oauth_cache_valid "$active"; then
+            echo -e "  凭证: ${GREEN}已缓存${NC}"
+        else
+            echo -e "  凭证: ${YELLOW}未缓存${NC}"
+        fi
     fi
 }
-
-# 添加 profile
 cmd_add() {
     if [ $# -lt 2 ]; then
         echo -e "${RED}用法: cc add <名称> --key <API_KEY> 或 cc add <名称> --oauth${NC}"
@@ -418,6 +480,20 @@ cmd_use() {
     fi
 
     if [ "$type" = "api_key" ]; then
+        # 切换前：备份当前激活的 OAuth profile 的凭证
+        local prev_active
+        prev_active=$(get_active)
+        if [ -n "$prev_active" ]; then
+            local prev_type
+            prev_type=$(read_profiles ".profiles[\"$prev_active\"].type")
+            if [ "$prev_type" = "oauth" ] && [ -f "$CLAUDE_CREDENTIALS" ]; then
+                _oauth_cache_save "$prev_active"
+            fi
+        fi
+
+        # 切换到 API Key 时清除 OAuth 凭证文件（避免冲突）
+        rm -f "$CLAUDE_CREDENTIALS"
+
         _apply_profile "$name"
 
         local key url
@@ -432,6 +508,17 @@ cmd_use() {
         fi
 
     elif [ "$type" = "oauth" ]; then
+        # 切换前：备份当前激活的 OAuth profile 的凭证
+        local prev_active
+        prev_active=$(get_active)
+        if [ -n "$prev_active" ]; then
+            local prev_type
+            prev_type=$(read_profiles ".profiles[\"$prev_active\"].type")
+            if [ "$prev_type" = "oauth" ] && [ -f "$CLAUDE_CREDENTIALS" ]; then
+                _oauth_cache_save "$prev_active"
+            fi
+        fi
+
         # OAuth: 清除 config.json 中的 API Key，让 claude 走 OAuth 流程
         if [ -f "$CLAUDE_CONFIG" ]; then
             local new_config
@@ -453,11 +540,26 @@ cmd_use() {
             echo "unset ANTHROPIC_BASE_URL 2>/dev/null || true"
         } > "$ENV_FILE"
 
-        echo -e "${GREEN}✓ 已切换到: ${BOLD}$name${NC} (OAuth)"
-        echo -e "${CYAN}  正在执行 OAuth 登录流程...${NC}"
-        echo ""
-        claude /logout 2>/dev/null || true
-        claude /login
+        # 尝试从缓存恢复 OAuth 凭证
+        if _oauth_cache_valid "$name"; then
+            _oauth_cache_restore "$name"
+            echo -e "${GREEN}✓ 已切换到: ${BOLD}$name${NC} (OAuth, 从缓存恢复)"
+            echo -e "${CYAN}  凭证已恢复，无需重新登录${NC}"
+        else
+            # 无缓存或无效，走完整登录流程
+            rm -f "$CLAUDE_CREDENTIALS"
+            echo -e "${GREEN}✓ 已切换到: ${BOLD}$name${NC} (OAuth)"
+            echo -e "${CYAN}  正在执行 OAuth 登录流程...${NC}"
+            echo ""
+            claude /logout 2>/dev/null || true
+            claude /login
+
+            # 登录成功后自动缓存凭证
+            if [ -f "$CLAUDE_CREDENTIALS" ]; then
+                _oauth_cache_save "$name"
+                echo -e "${GREEN}  ✓ OAuth 凭证已缓存，下次切换无需重新登录${NC}"
+            fi
+        fi
     fi
 
     # 更新 active
@@ -492,6 +594,9 @@ cmd_rm() {
     if [ "$name" = "$active" ]; then
         profiles_data=$(echo "$profiles_data" | jq '.active = ""')
     fi
+
+    # 清理 OAuth 凭证缓存
+    _oauth_cache_remove "$name"
 
     write_profiles "$profiles_data"
     echo -e "${GREEN}✓ 已删除 profile: $name${NC}"
@@ -540,6 +645,11 @@ cmd_rename() {
 
     write_profiles "$profiles_data"
     echo -e "${GREEN}✓ 已重命名: $old_name → $new_name${NC}"
+
+    # 重命名 OAuth 凭证缓存
+    if [ -f "$OAUTH_CREDS_DIR/${old_name}.credentials.json" ]; then
+        mv "$OAUTH_CREDS_DIR/${old_name}.credentials.json" "$OAUTH_CREDS_DIR/${new_name}.credentials.json"
+    fi
 }
 
 # 查看 profile 详情
@@ -584,10 +694,14 @@ cmd_show() {
         if [ -n "$url_val" ]; then
             echo -e "  URL:    $url_val"
         fi
+    elif [ "$type" = "oauth" ]; then
+        if _oauth_cache_valid "$name"; then
+            echo -e "  凭证:   ${GREEN}已缓存（可免登录切换）${NC}"
+        else
+            echo -e "  凭证:   ${YELLOW}未缓存（切换时需登录）${NC}"
+        fi
     fi
 }
-
-# 测试 profile 连通性
 cmd_test() {
     local name=""
     if [ $# -ge 1 ]; then
@@ -1078,6 +1192,54 @@ cmd_import_current() {
     fi
 }
 
+# 强制刷新 OAuth 登录（重新登录并更新缓存）
+cmd_login() {
+    local name=""
+    if [ $# -ge 1 ]; then
+        name="$1"
+    else
+        name=$(get_active)
+        if [ -z "$name" ]; then
+            echo -e "${RED}当前没有激活的 profile，请指定名称: cc login <名称>${NC}"
+            return 1
+        fi
+    fi
+
+    local profile
+    profile=$(read_profiles ".profiles[\"$name\"] // empty")
+    if [ -z "$profile" ] || [ "$profile" = "null" ]; then
+        echo -e "${RED}Profile '$name' 不存在${NC}"
+        return 1
+    fi
+
+    local type
+    type=$(read_profiles ".profiles[\"$name\"].type")
+
+    if [ "$type" != "oauth" ]; then
+        echo -e "${RED}login 仅适用于 OAuth 类型 profile${NC}"
+        return 1
+    fi
+
+    echo -e "${CYAN}强制刷新 OAuth 登录: ${BOLD}$name${NC}"
+    echo ""
+
+    # 清除旧凭证
+    rm -f "$CLAUDE_CREDENTIALS"
+    _oauth_cache_remove "$name"
+
+    # 执行登录
+    claude /logout 2>/dev/null || true
+    claude /login
+
+    # 缓存新凭证
+    if [ -f "$CLAUDE_CREDENTIALS" ]; then
+        _oauth_cache_save "$name"
+        echo -e "${GREEN}✓ OAuth 凭证已刷新并缓存${NC}"
+    else
+        echo -e "${YELLOW}⚠ 登录后未检测到凭证文件，缓存未更新${NC}"
+    fi
+}
+
 # 主入口
 main() {
     init
@@ -1106,6 +1268,7 @@ main() {
         backup)           cmd_backup "$@" ;;
         update)           cmd_update "$@" ;;
         import)           cmd_import_current "$@" ;;
+        login)            with_lock cmd_login "$@" ;;
         help|-h|--help)   usage ;;
         *)
             echo -e "${RED}未知命令: $cmd${NC}"

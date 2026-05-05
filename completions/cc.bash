@@ -8,13 +8,13 @@ _cc_complete() {
 
     # 第一层：子命令补全
     if [ "$COMP_CWORD" -eq 1 ]; then
-        COMPREPLY=($(compgen -W "list current add use edit test exec rm rename show export import-file backup update import help" -- "$cur"))
+        COMPREPLY=($(compgen -W "list current add use edit test login exec rm rename show export import-file backup update import help" -- "$cur"))
         return
     fi
 
     # 第二层：需要 profile 名称的子命令
     case "${COMP_WORDS[1]}" in
-        use|switch|rm|del|remove|show|info|edit|test|exec|rename)
+        use|switch|rm|del|remove|show|info|edit|test|login|exec|rename)
             if [ "$COMP_CWORD" -eq 2 ]; then
                 local names
                 names=$(jq -r '.profiles | keys[]' ~/.cc-profiles/profiles.json 2>/dev/null)

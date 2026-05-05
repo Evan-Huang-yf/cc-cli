@@ -21,6 +21,7 @@ _cc() {
         'switch:切换到指定 profile'
         'edit:修改 profile 属性'
         'test:测试 profile 连通性'
+        'login:强制刷新 OAuth 登录'
         'exec:临时使用某 profile 执行命令'
         'rm:删除 profile'
         'del:删除 profile'
@@ -46,7 +47,7 @@ _cc() {
             ;;
         args)
             case "${words[1]}" in
-                use|switch|rm|del|remove|show|info|edit|test|exec|rename|mv)
+                use|switch|rm|del|remove|show|info|edit|test|login|exec|rename|mv)
                     if [ "$CURRENT" -eq 2 ]; then
                         _cc_profiles
                     else

@@ -7,6 +7,8 @@
 ## 功能亮点
 
 - **多 Profile 管理** — 同时存储多个 API Key / OAuth 账号，随时切换
+- **OAuth 凭证缓存** — OAuth 账号登录一次后自动缓存，切换时无需重新登录
+- **多 OAuth 账号共存** — 支持缓存多个 OAuth 账号，与 API Key 无缝交替使用
 - **第三方中转支持** — 支持 `--url` 指定自定义 Base URL（如 runapi、openrouter 等）
 - **一键连通测试** — `cc test` 验证 API Key 是否有效
 - **临时切换执行** — `cc exec` 在不改全局状态下临时使用某个 profile 执行命令
@@ -153,6 +155,9 @@ cc add runapi --key sk-xxx --url https://runapi.co --tag dev
 # 添加 OAuth 官方账号
 cc add personal --oauth
 
+# 添加第二个 OAuth 账号（如团队账号）
+cc add team --oauth --tag work
+
 # 查看所有 profile
 cc list
 
@@ -161,6 +166,15 @@ cc use work
 
 # 测试连通性
 cc test work
+
+# OAuth 和 API Key 无缝交替（首次 OAuth 需登录，之后自动缓存）
+cc use personal    # OAuth，首次需浏览器登录
+cc use runapi      # 切到 API Key，OAuth 凭证自动保存
+cc use personal    # 再切回 OAuth，从缓存恢复，无需重新登录
+cc use team        # 切到另一个 OAuth 账号，同样免登录
+
+# 强制刷新 OAuth 登录（token 过期时使用）
+cc login personal
 ```
 
 ## 完整命令参考
@@ -224,7 +238,18 @@ cc use          # fzf 交互选择
 3. 更新终端环境变量 `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`
 4. 自动启动 `claude`
 
-切换 OAuth 类型时，会执行 `claude /logout` + `claude /login` 流程。
+切换 OAuth 类型时：
+- **有缓存凭证** → 直接恢复，无需重新登录（秒切）
+- **无缓存** → 执行 `claude /login` 流程，登录后自动缓存凭证
+
+### `cc login [名称]`
+
+强制刷新 OAuth 登录并更新凭证缓存。当 token 过期或需要切换到不同的 claude.ai 账号时使用。
+
+```bash
+cc login personal   # 强制重新登录指定 OAuth profile
+cc login            # 强制重新登录当前激活的 OAuth profile
+```
 
 ### `cc edit <名称> [选项]`
 
@@ -333,6 +358,9 @@ cc-cli 使用以下文件：
 ~/.cc-profiles/
 ├── profiles.json          # 所有 profile 数据（JSON 格式）
 ├── env.sh                 # 当前激活 profile 的环境变量（自动生成）
+├── oauth-credentials/     # OAuth 凭证缓存目录（每个 OAuth profile 一个文件）
+│   ├── personal.credentials.json
+│   └── team.credentials.json
 ├── .lock_dir/             # 目录锁（并发控制，自动管理）
 ├── .config_backup.json    # 上次切换前的 config.json 备份
 └── backups/               # cc backup 的备份目录
@@ -431,6 +459,16 @@ cc-cli 使用以下文件：
 - 直接使用 `gcc` 或 `clang`
 - 使用完整路径 `/usr/bin/cc`
 - 或者将工具重命名为其他名称（如 `ccs`），修改 `~/.local/bin/` 中的文件名和 `.bashrc` 中的 wrapper 函数名即可
+
+### Q: OAuth 账号切换需要每次重新登录吗？
+
+不需要。cc-cli 会自动缓存 OAuth 凭证（refresh token）。首次添加 OAuth profile 并登录后，凭证会保存到 `~/.cc-profiles/oauth-credentials/` 目录。之后在 OAuth 和 API Key 之间来回切换时，OAuth 凭证会自动恢复，无需重新打开浏览器登录。
+
+如果 token 过期或需要切换到不同的 claude.ai 账号，使用 `cc login <名称>` 强制刷新。
+
+### Q: 可以同时缓存多个 OAuth 账号吗？
+
+可以。每个 OAuth profile 的凭证独立缓存。例如你可以有 `personal`（个人 Pro 账号）和 `team`（团队账号），两者互不干扰，切换时都无需重新登录。
 
 ## 卸载
 
