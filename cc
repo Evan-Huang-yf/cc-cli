@@ -534,9 +534,11 @@ cmd_use() {
             echo "$new_settings" > "$CLAUDE_SETTINGS"
         fi
 
-        # OAuth: 清除 API key 和 base url
+        # OAuth: 清除 API key、base url 和 auth token
+        # ANTHROPIC_AUTH_TOKEN 是 Claude Code 识别的等价凭证，未清除会阻止 OAuth 流程
         {
             echo "unset ANTHROPIC_API_KEY 2>/dev/null || true"
+            echo "unset ANTHROPIC_AUTH_TOKEN 2>/dev/null || true"
             echo "unset ANTHROPIC_BASE_URL 2>/dev/null || true"
         } > "$ENV_FILE"
 
@@ -923,7 +925,9 @@ _apply_profile() {
         fi
 
         # 写入 env.sh（终端环境变量）
+        # 同时 unset ANTHROPIC_AUTH_TOKEN，避免外部工具设置的 token 与 API_KEY 共存导致路由错乱
         {
+            echo "unset ANTHROPIC_AUTH_TOKEN 2>/dev/null || true"
             echo "export ANTHROPIC_API_KEY=\"$key\""
             if [ -n "$url" ]; then
                 echo "export ANTHROPIC_BASE_URL=\"$url\""
@@ -977,7 +981,9 @@ cmd_exec() {
     echo -e "${CYAN}临时使用 profile: ${BOLD}$name${NC} 执行命令..."
 
     # 在子 shell 中设置环境变量并执行
+    # unset ANTHROPIC_AUTH_TOKEN 防止父 shell 残留的 token 与 API_KEY 共存导致路由错乱
     (
+        unset ANTHROPIC_AUTH_TOKEN 2>/dev/null || true
         export ANTHROPIC_API_KEY="$key"
         if [ -n "$url" ]; then
             export ANTHROPIC_BASE_URL="$url"
